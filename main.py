@@ -28,6 +28,8 @@ from telegram_send import send_message
 from typing import Tuple, Dict, List, Any, Optional
 from webdriver_manager.chrome import ChromeDriverManager
 from dotenv import load_dotenv
+from urllib.parse import urljoin
+
 
 load_dotenv()
 urllib3.disable_warnings()
@@ -35,11 +37,11 @@ urllib3.disable_warnings()
 today: str = datetime.datetime.now().strftime('%d.%m.%Y')
 
 base_url: str = os.getenv('BASE_URL')
-index_page_url: str = join(base_url, 'knp/main/index')
-personal_cabinet_url: str = join(base_url, 'knp/personal-cabinet/')
-logout_url: str = join(base_url, 'sonoweb/content/exit.faces')
-notification_url: str = join(base_url, 'knp/notifications/esutd/?id=')
-tax_statements_url: str = join(base_url, 'knp/declarations/registry/')
+index_page_url: str = urljoin(base_url, 'knp/main/index')
+personal_cabinet_url: str = urljoin(base_url, 'knp/personal-cabinet/')
+logout_url: str = urljoin(base_url, 'sonoweb/content/exit.faces')
+notification_url: str = urljoin(base_url, 'knp/notifications/esutd/?id=')
+tax_statements_url: str = urljoin(base_url, 'knp/declarations/registry/')
 
 login_button: Tuple[str, str] = (By.CSS_SELECTOR, 'button.enter-by-cert-button')
 auth_key_input: Tuple[str, str] = (By.CSS_SELECTOR, 'input.custom-file-input')
@@ -116,7 +118,7 @@ def get_headers(driver: WebDriver) -> Dict[str, str]:
         'Content-Type': 'application/json;charset=utf-8',
         'Cookie': f'cookiesession1={cookie_session}; NS={ns}; NSIV={nsiv}',
         'Origin': base_url,
-        'Referer': join(base_url, 'knp/notifications/registry/'),
+        'Referer': urljoin(base_url, 'knp/notifications/registry/'),
         'Sec-Fetch-Dest': 'empty',
         'Sec-Fetch-Mode': 'cors',
         'Sec-Fetch-Site': 'same-origin',
@@ -136,7 +138,7 @@ def get_latest_working_day() -> str:
 
 
 def get_notifications(driver: WebDriver) -> Optional[List[Any]]:
-    url = join(base_url, 'notifications/registry/tp/list')
+    url = urljoin(base_url, 'notifications/registry/tp/list')
 
     payload = {
         'receiveDate1': get_latest_working_day(),
@@ -150,11 +152,17 @@ def get_notifications(driver: WebDriver) -> Optional[List[Any]]:
         'pageSortAsc': False
     }
     headers = get_headers(driver=driver)
+    response = None
 
-    response = requests.request('POST', url, json=payload, headers=headers, verify=False)
+    while True:
+        try:
+            response = requests.request('POST', url, json=payload, headers=headers, verify=False)
+        except requests.exceptions.ConnectionError:
+            sleep(60)
+        break
     try:
         return response.json()
-    except json.decoder.JSONDecodeError:
+    except (json.decoder.JSONDecodeError, AttributeError):
         return None
 
 
@@ -249,7 +257,7 @@ def save_notification(notification: Dict[str, any], driver: WebDriver, wait: Web
 
 
 def send_tax_request(session: requests.Session, headers: Dict[str, str]):
-    url = join(base_url, 'declaration/debt/send')
+    url = urljoin(base_url, 'declaration/debt/send')
     payload = {
         'dateRequest': today,
         'refGoal': '0xffff00000019',
@@ -261,7 +269,7 @@ def send_tax_request(session: requests.Session, headers: Dict[str, str]):
 
 
 def save_pdf_statement(doc_info: Dict, session: requests.Session, headers: Dict[str, str]) -> None:
-    url = join(base_url, f'{doc_info["actions"][0]["target"]}')
+    url = urljoin(base_url, f'{doc_info["actions"][0]["target"]}')
     response = session.request('GET', url, headers=headers, verify=False)
 
     prefix = len(listdir(pdf_save_path)) + 1
@@ -271,17 +279,20 @@ def save_pdf_statement(doc_info: Dict, session: requests.Session, headers: Dict[
 
 def get_tax_statement(session: requests.Session, headers: Dict[str, str]):
     while True:
-        url = join(base_url, 'declarations/registry/tp/allByDates')
+        url = urljoin(base_url, 'declarations/registry/tp/allByDates')
         querystring = {'from': today, 'to': today}
         response = session.request('GET', url, headers=headers, params=querystring, verify=False)
         docs_infos: List[Dict[str, str]] = response.json()
+        print(docs_infos)
+        if not docs_infos:
+            continue
         if len(docs_infos[0]['actions']) != 0:
             save_pdf_statement(doc_info=docs_infos[0], session=session, headers=headers)
             break
 
 
 def run_salyq() -> None:
-    send_message('Старт процесса Salyq')
+    # send_message('Старт процесса Salyq')
 
     with open(file='branch_mapping.json', mode='r', encoding='utf-8') as f:
         branch_mappings: Dict[str, str] = json.load(f)
@@ -295,6 +306,8 @@ def run_salyq() -> None:
     options.add_argument('--start-maximized')
     driver = webdriver.Chrome(service=service, options=options)
     wait = WebDriverWait(driver, 10)
+
+    branch_mappings = {key: val for key, val in branch_mappings.items() if int(key) >= 18}
 
     with driver:
         for branch, branch_name in branch_mappings.items():
@@ -318,7 +331,7 @@ def run_salyq() -> None:
                         send_message(f'🟢Есть уведомление по филиалу {branch}🟢')
                     else:
                         if notification['descriptionRu'] != 'низкая':
-                            url = join(base_url, f'notifications/inis/view/{notification["id"]}')
+                            url = urljoin(base_url, f'notifications/inis/view/{notification["id"]}')
                             headers = get_headers(driver=driver)
                             response = requests.request('GET', url, headers=headers, verify=False)
                             response.raise_for_status()
@@ -366,13 +379,17 @@ def run_salyq() -> None:
 
 def wait_until(target_hour: int) -> None:
     while True:
-        current_time = time.localtime()
-        if current_time.tm_hour == target_hour:
+        current_hour = time.localtime().tm_hour
+        if current_hour == target_hour:
             break
         print('waiting')
-        sleep(60)
+        sleep(300)
 
 
 if __name__ == '__main__':
-    wait_until(target_hour=9)
-    run_salyq()
+    try:
+        wait_until(target_hour=9)
+        run_salyq()
+    except Exception as e:
+        send_message(message=str(e), is_error=True)
+        raise e
