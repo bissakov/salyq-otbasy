@@ -5,11 +5,8 @@ import datetime
 import json
 import logging
 import pdfkit
-import psutil
-import pywinauto
 import requests
 import shutil
-import win32com.client
 from constants import *
 from datetime import timedelta
 from docx import Document
@@ -26,6 +23,7 @@ from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.support.ui import WebDriverWait
 from telegram_send import send_message
 from typing import Dict, List, Any, Optional
+from utils import dispatch, doc_open, kill_all_processes, paste_notification_content
 from webdriver_manager.chrome import ChromeDriverManager
 
 
@@ -165,20 +163,6 @@ def save_screen_doc(today: str, branch_mappings: Dict[str, str]) -> None:
     shutil.copyfile(screen_doc_path, join(SCREEN_FSERVER_FOLDER_PATH, f'{today}.docx'))
 
 
-def get_current_process_pid(proc_name: str) -> int or None:
-    return next((p.pid for p in psutil.process_iter() if proc_name in p.name()), None)
-
-
-def kill_all_processes(proc_name: str) -> None:
-    for proc in psutil.process_iter():
-        if proc_name in proc.name():
-            process = psutil.Process(proc.pid)
-            try:
-                process.terminate()
-            except psutil.AccessDenied:
-                continue
-
-
 def save_notification_doc(today: str, prefix: str) -> None:
     notification_folder_path = join(NOTIFICATION_FOLDER_PATH, today)
     logging.info(f'Notification folder path {notification_folder_path}')
@@ -193,38 +177,22 @@ def save_notification_doc(today: str, prefix: str) -> None:
                 logging.info(f'Notification doc file exists {notification_doc_file}. Deleting')
                 os.unlink(notification_doc_file)
 
-            word = win32com.client.Dispatch("Word.Application")
-            word.visible = True
-            word.DisplayAlerts = False
-            logging.info('Opening WINWORD.EXE')
+            with dispatch('Word.Application') as word:
+                word.visible = True
+                logging.info('Opening WINWORD.EXE')
 
-            if not exists(notification_doc_file):
-                with open(notification_doc_file, 'w'):
-                    pass
-                logging.info(f'Notification doc file created {notification_doc_file}')
-            word.Documents.Open(notification_doc_file)
-            logging.info(f'Notification doc file opened {notification_doc_file} in WINWORD.EXE')
-            sleep(5)
-            word_pid = get_current_process_pid(proc_name='WINWORD.EXE')
-            logging.info(f'WINWORD.EXE pid {word_pid}')
-            app = pywinauto.Application(backend='uia').connect(process=word_pid)
-            logging.info(f'WINWORD.EXE app {app} is connected to {word_pid}')
-            for win in app.windows():
-                win_text = win.window_text()
-                if not win_text:
-                    continue
-                window = app.window(title=win_text)
-                window['Закрыть'].click()
-            logging.info(f'WINWORD.EXE license window closed')
-            doc = word.ActiveDocument
-            app.top_window().set_focus()
-            logging.info(f'WINWORD.EXE top window is focused')
+                if not exists(notification_doc_file):
+                    with open(notification_doc_file, 'w'):
+                        pass
+                    logging.info(f'Notification doc file created {notification_doc_file}')
 
-            app.top_window().type_keys('{VK_CONTROL down}v{VK_CONTROL up}')
-            logging.info(f'Notification content is pasted')
-            doc.Close(True)
-            logging.info(f'Notification doc file closed and saved {notification_doc_file}')
-            word.Quit()
+                with doc_open(app=word, document=notification_doc_file):
+                    logging.info(f'Notification doc file opened {notification_doc_file} in WINWORD.EXE')
+                    sleep(5)
+
+                    paste_notification_content(proc_name='WINWORD.EXE')
+
+                    logging.info(f'Notification doc file closed and saved {notification_doc_file}')
             logging.info(f'WINWORD.EXE is closed')
             job_done = True
         except AttributeError as error:
