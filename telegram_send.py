@@ -1,6 +1,6 @@
 import os
-from dotenv import load_dotenv
 import requests
+from dotenv import load_dotenv
 
 
 def _send_message(bot_token:str, chat_id: str, message: str) -> None:
