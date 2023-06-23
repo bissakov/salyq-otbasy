@@ -1,14 +1,16 @@
 import time
 from time import sleep
+
 import datetime
 import json
+import logging
 import pdfkit
 import psutil
 import pywinauto
 import requests
 import shutil
-import urllib3
 import win32com.client
+from constants import *
 from datetime import timedelta
 from docx import Document
 from docx.shared import Inches
@@ -25,8 +27,6 @@ from selenium.webdriver.support.ui import WebDriverWait
 from telegram_send import send_message
 from typing import Dict, List, Any, Optional
 from webdriver_manager.chrome import ChromeDriverManager
-from constants import *
-import logging
 
 
 def login(driver: WebDriver, wait: WebDriverWait, auth_key_path: str, password: str) -> None:
@@ -361,9 +361,10 @@ def run_salyq(today: str) -> None:
                     if save_notification(today=today, notification=notification,
                                          driver=driver, wait=wait, branch=branch):
                         logging.info(f'Notification {branch} saved via manual copy and pasting')
-                        send_message(f'🟢Есть уведомление по филиалу {branch}🟢')
+                        send_message(f'Есть уведомление по филиалу {branch}')
                     else:
                         if notification['descriptionRu'] != 'низкая':
+                            send_message(f'Есть уведомление по филиалу {branch}')
                             logging.info(f'Branch {branch} has a notification that could be saved via request')
 
                             url = urljoin(BASE_URL, f'notifications/inis/view/{notification["id"]}')
@@ -383,8 +384,17 @@ def run_salyq(today: str) -> None:
                             pdf_name = join(notification_folder_path, f'уведомление_{branch}_{receive_date}.pdf')
                             logging.info(f'pdf_name: {pdf_name}')
 
-                            pdfkit.from_string(response.text.strip(), r'C:\temp.pdf', options={"encoding": "UTF-8"})
-                            shutil.copyfile(r'C:\temp.pdf', pdf_name)
+                            if response.text == '':
+                                url = urljoin(
+                                    BASE_URL,
+                                    f'notifications/cc/tp/notification/download/{notification["id"]}'
+                                )
+                                response = requests.request('GET', url, headers=headers, verify=False)
+                                with open(pdf_name, 'wb') as f:
+                                    f.write(response.content)
+                            else:
+                                pdfkit.from_string(response.text.strip(), r'C:\temp.pdf', options={"encoding": "UTF-8"})
+                                shutil.copyfile(r'C:\temp.pdf', pdf_name)
 
                             logging.info(f'PDF {pdf_name} saved for a branch {branch}')
 
@@ -396,10 +406,15 @@ def run_salyq(today: str) -> None:
             driver.get(LOGOUT_URL)
             sleep(2)
 
-    send_email(folder_path=notification_folder_path)
-    logging.info('Email sent')
+    attachments = [join(notification_folder_path, file_name) for file_name in listdir(notification_folder_path)]
+    if attachments:
+        send_message('Отправка уведомлений')
+        send_email(attachments=attachments)
+        logging.info('Email sent')
 
     save_screen_doc(today=today, branch_mappings=branch_mappings)
+    doc_path = join(SCREEN_FSERVER_FOLDER_PATH, f'{today}.docx')
+    send_message(f'Сохранен документ со скринштоами {doc_path}')
     logging.info('Screen doc saved')
 
     if datetime.datetime.now().weekday() == 4:
