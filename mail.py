@@ -1,9 +1,7 @@
-from os import listdir
-from os.path import join
-
 import psutil
 import win32com.client
 from dataclasses import dataclass
+from typing import List
 
 
 def kill_all_processes(proc_name: str) -> None:
@@ -51,12 +49,6 @@ class Mail:
         return mail
 
 
-def send_email(folder_path: str):
-    attachments = [join(folder_path, file_name) for file_name in listdir(folder_path)]
-    if attachments:
-        email_info = EmailInfo(attachments=attachments)
-        Mail(email_info=email_info).send()
-
-
-if __name__ == '__main__':
-    send_email(folder_path=r'C:\Users\robot.ad\PycharmProjects\Salyk\Notifications\30.05.2023')
+def send_email(attachments: List[str]):
+    email_info = EmailInfo(attachments=attachments)
+    Mail(email_info=email_info).send()
