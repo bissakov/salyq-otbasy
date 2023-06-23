@@ -1,17 +1,6 @@
-import psutil
-import win32com.client
 from dataclasses import dataclass
 from typing import List
-
-
-def kill_all_processes(proc_name: str) -> None:
-    for proc in psutil.process_iter():
-        if proc_name in proc.name():
-            process = psutil.Process(proc.pid)
-            try:
-                process.terminate()
-            except psutil.AccessDenied:
-                continue
+from utils import dispatch, kill_all_processes
 
 
 @dataclass
@@ -23,32 +12,17 @@ class EmailInfo:
     body: str = 'Уведомление с кабинета налогоплательщика филиала'
 
 
-class Mail:
-    def __init__(self, email_info: EmailInfo) -> None:
-        kill_all_processes(proc_name='OUTLOOK.EXE')
-        self.email = email_info
-        try:
-            self.outlook = win32com.client.Dispatch('Outlook.Application')
-        except Exception:
-            kill_all_processes(proc_name='OUTLOOK.EXE')
-            self.outlook = win32com.client.Dispatch('Outlook.Application')
-
-    def send(self):
-        mail = self.construct_mail()
-        mail.Send()
-        self.outlook.Quit()
-
-    def construct_mail(self):
-        mail = self.outlook.CreateItem(0)
-        mail.To = self.email.recipient
-        mail.Subject = self.email.subject
-        mail.Body = self.email.body
-        if self.email.attachments:
-            for attachment in self.email.attachments:
-                mail.Attachments.Add(attachment)
-        return mail
-
-
 def send_email(attachments: List[str]):
+    kill_all_processes(proc_name='OUTLOOK.EXE')
+
     email_info = EmailInfo(attachments=attachments)
-    Mail(email_info=email_info).send()
+    with dispatch('Outlook.Application') as outlook:
+        mail = outlook.CreateItem(0)
+        mail.To = email_info.recipient
+        mail.Subject = email_info.subject
+        mail.Body = email_info.body
+        if email_info.attachments:
+            for attachment in email_info.attachments:
+                mail.Attachments.Add(attachment)
+        mail.Send()
+
