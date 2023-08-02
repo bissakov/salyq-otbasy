@@ -4,6 +4,7 @@ Notifications/*
 Resources/*
 Screen/*
 logs/*
+keys/*
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
