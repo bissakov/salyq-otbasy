@@ -3,12 +3,13 @@ import logging
 import urllib3
 from os import makedirs
 from os.path import join
+from selenium.webdriver.remote.remote_connection import LOGGER
 
 from pywinauto import actionlogger
 
 
 def setup_logger() -> None:
-    root_folder = r'C:\Users\robot.ad\Desktop\sverka-zp\logs'
+    root_folder = r'C:\Users\robot.ad\PycharmProjects\Salyk\logs'
     makedirs(root_folder, exist_ok=True)
     actionlogger.enable()
     logger = logging.getLogger()
@@ -34,3 +35,5 @@ def setup_logger() -> None:
     logger.addHandler(stream_handler)
 
     urllib3.disable_warnings()
+
+    LOGGER.setLevel(logging.WARNING)

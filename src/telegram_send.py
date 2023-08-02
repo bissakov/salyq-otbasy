@@ -1,3 +1,4 @@
+import logging
 import os
 import requests
 from dotenv import load_dotenv
@@ -22,5 +23,12 @@ def send_message(message: str, is_error: bool = False) -> None:
     bot_token, chat_id = (os.getenv('BOT_TOKEN'), os.getenv('CHAT_ID'))\
         if not is_error \
         else (os.getenv('ERROR_TOKEN'), os.getenv('ERROR_CHAT_ID'))
-    _send_message(bot_token=bot_token, chat_id=chat_id, message=message)
+    try:
+        _send_message(bot_token=bot_token, chat_id=chat_id, message=message)
+    except Exception as e:
+        logging.error(f'Error while sending message to Telegram: {e}')
     # pass
+
+
+if __name__ == '__main__':
+    send_message('test', is_error=True)

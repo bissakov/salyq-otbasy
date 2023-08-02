@@ -82,7 +82,6 @@ def login(driver: WebDriver, wait: WebDriverWait, auth_key_path: str, password: 
 
 
 def get_headers(driver: WebDriver) -> Dict[str, str]:
-    cookie_session = driver.get_cookie('cookiesession1')['value']
     ns = driver.get_cookie('NS')['value']
     nsiv = driver.get_cookie('NSIV')['value']
     return {
@@ -90,7 +89,7 @@ def get_headers(driver: WebDriver) -> Dict[str, str]:
         'Accept-Language': 'en-US,en;q=0.9',
         'Connection': 'keep-alive',
         'Content-Type': 'application/json;charset=utf-8',
-        'Cookie': f'cookiesession1={cookie_session}; NS={ns}; NSIV={nsiv}',
+        'Cookie': f'NS={ns}; NSIV={nsiv}',
         'Origin': BASE_URL,
         'Referer': TAX_STATEMENTS_URL,
         'Sec-Fetch-Dest': 'empty',
@@ -155,49 +154,16 @@ def save_screen_doc(today: str, branch_mappings: Dict[str, str]) -> None:
     screen_local_folder_path = join(SCREEN_LOCAL_FOLDER_PATH, today)
     screen_doc_path = join(screen_local_folder_path, f'{today}.docx')
     doc = Document()
-    doc.add_heading('Снимки экрана Salyq', 0)
+    doc.add_heading('Снимки экрана Salyk', 0)
     for branch, branch_name in branch_mappings.items():
         doc.add_paragraph(branch_name)
         doc.add_picture(join(screen_local_folder_path, f'{branch}.png'), width=Inches(7))
     doc.save(screen_doc_path)
-    shutil.copyfile(screen_doc_path, join(SCREEN_FSERVER_FOLDER_PATH, f'{today}.docx'))
-
-
-def save_notification_doc(today: str, prefix: str) -> None:
-    notification_folder_path = join(NOTIFICATION_FOLDER_PATH, today)
-    logging.info(f'Notification folder path {notification_folder_path}')
-    job_done = False
-    while not job_done:
-        try:
-            kill_all_processes(proc_name='WINWORD.EXE')
-            logging.info('Killing all WINWORD.EXE processes')
-            notification_doc_file = join(notification_folder_path, f'уведомление_{prefix}.docx')
-            logging.info(f'Notification doc file {notification_doc_file}')
-            if exists(notification_doc_file):
-                logging.info(f'Notification doc file exists {notification_doc_file}. Deleting')
-                os.unlink(notification_doc_file)
-
-            with dispatch('Word.Application') as word:
-                word.visible = True
-                logging.info('Opening WINWORD.EXE')
-
-                if not exists(notification_doc_file):
-                    with open(notification_doc_file, 'w'):
-                        pass
-                    logging.info(f'Notification doc file created {notification_doc_file}')
-
-                with doc_open(app=word, document=notification_doc_file):
-                    logging.info(f'Notification doc file opened {notification_doc_file} in WINWORD.EXE')
-                    sleep(5)
-
-                    paste_notification_content(proc_name='WINWORD.EXE')
-
-                    logging.info(f'Notification doc file closed and saved {notification_doc_file}')
-            logging.info(f'WINWORD.EXE is closed')
-            job_done = True
-        except AttributeError as error:
-            logging.info(f'Retrying. Rrror {error}')
-            continue
+    file_name = f'{today}.docx'
+    current_day = datetime.datetime.now().strftime('%d.%m.%Y')
+    if today != current_day:
+        file_name = f'{today}_({current_day}).docx'
+    shutil.copyfile(screen_doc_path, join(SCREEN_FSERVER_FOLDER_PATH, file_name))
 
 
 def save_notification(today: str, notification: Dict[str, any],
@@ -219,7 +185,8 @@ def save_notification(today: str, notification: Dict[str, any],
             notification_url = f'{NOTIFICATION_URL}{notification_id}'
             driver.get(notification_url)
             logging.info(f'Notification url {notification_url}')
-            wait.until(EC.presence_of_element_located(NOTIFICATION_CONTENT))
+            wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, '.mainContent')))
+            wait.until(EC.text_to_be_present_in_element((By.TAG_NAME, 'body'), 'Уважаемый работодатель!'))
             logging.info('Notification content is present')
             job_done = True
         except TimeoutException:
@@ -228,13 +195,78 @@ def save_notification(today: str, notification: Dict[str, any],
             logging.info(f'Notification content is not present. Retrying: {retry_count}')
             continue
     driver.execute_script('''
-        const notification = document.querySelector('#notification-content > div > div > div');
+        const notificationContentElement = document.querySelector('#notification-content');
+        const textNormalElement = document.querySelector('.textNormal');
+
+        let notification;
+
+        if (notificationContentElement !== null) {
+          notification = document.querySelector('#notification-content > div > div > div')
+        } else if (textNormalElement !== null) {
+          notification = document.querySelector('.textNormal');
+        }  
+
         document.querySelector('body > div').remove();
         document.body.append(notification);
+
+        const scripts = document.querySelectorAll('script, noscript');
+        scripts.forEach(script => script.remove());
     ''')
-    ActionChains(driver).key_down(Keys.CONTROL).send_keys('a').send_keys('c').perform()
-    logging.info('Notification content copied')
-    save_notification_doc(today=today, prefix=f'{branch}_{receive_date}')
+
+    notification_folder_path = join(NOTIFICATION_FOLDER_PATH, today)
+    pdf_name = join(notification_folder_path, f'уведомление_{branch}_{receive_date}.pdf')
+    logging.info(f'pdf_name: {pdf_name}')
+
+    source = driver.execute_script('return document.body.outerHTML;')
+    pdfkit.from_string(source, r'C:\temp.pdf', options={'encoding': 'UTF-8'})
+    shutil.copyfile(r'C:\temp.pdf', pdf_name)
+    return True
+
+
+def save_notification_risk(today: str, notification: Dict[str, any],
+                           driver: WebDriver, wait: WebDriverWait, branch: str) -> bool:
+    if notification['descriptionRu'] == 'низкая':
+        logging.info('Invalid type of notification ("низкая")')
+        return False
+    notification_id = notification['id']
+    logging.info(f'Notification id {notification_id}')
+    receive_date = notification['receiveDate'].replace(':', '')
+    logging.info(f'Notification receive date {receive_date}')
+    job_done = False
+    retry_count = 0
+    while not job_done:
+        if retry_count == 3:
+            logging.info(f'Notification could not be opened. Number of tries exceeded {retry_count}')
+            return False
+        try:
+            notification_url = f'https://cabinet.salyk.kz/knp/notifications/risk/?id={notification_id}'
+            driver.get(notification_url)
+            logging.info(f'Notification url {notification_url}')
+            wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, '#risk-content')))
+            logging.info('Notification content is present')
+            job_done = True
+        except TimeoutException:
+            sleep(5)
+            retry_count += 1
+            logging.info(f'Notification content is not present. Retrying: {retry_count}')
+            continue
+    driver.execute_script('''
+        document.querySelector('.print-button').remove();
+        const notification = document.querySelector('#risk-content');
+        document.querySelector('body > div').remove();
+        document.body.append(notification);
+        
+        const scripts = document.querySelectorAll('script, noscript');
+        scripts.forEach(script => script.remove());
+    ''')
+
+    notification_folder_path = join(NOTIFICATION_FOLDER_PATH, today)
+    pdf_name = join(notification_folder_path, f'уведомление_{branch}_{receive_date}.pdf')
+    logging.info(f'pdf_name: {pdf_name}')
+
+    source = driver.execute_script('return document.body.outerHTML;')
+    pdfkit.from_string(source, r'C:\temp.pdf', options={'encoding': 'UTF-8'})
+    shutil.copyfile(r'C:\temp.pdf', pdf_name)
     return True
 
 
@@ -273,10 +305,10 @@ def get_tax_statement(today: str, session: requests.Session, headers: Dict[str, 
             break
 
 
-def run_salyq(today: str) -> None:
-    send_message('Старт процесса Salyq')
+def run_salyk(today: str) -> None:
+    send_message(f'Старт процесса Salyk за {today}')
 
-    with open(file='branch_mapping.json', mode='r', encoding='utf-8') as f:
+    with open(file=r'C:\Users\robot.ad\PycharmProjects\Salyk\branch_mapping.json', mode='r', encoding='utf-8') as f:
         branch_mappings: Dict[str, str] = json.load(f)
 
     logging.info(f'branch_mappings: {branch_mappings}')
@@ -286,13 +318,16 @@ def run_salyq(today: str) -> None:
 
     logging.info(f'screen_local_folder_path: {screen_local_folder_path}')
     logging.info(f'notification_folder_path: {notification_folder_path}')
-    
+
     makedirs(screen_local_folder_path, exist_ok=True)
     makedirs(notification_folder_path, exist_ok=True)
 
     logging.info('Созданы папки для скриншотов и уведомлений')
 
-    service = Service(executable_path=ChromeDriverManager().install())
+    try:
+        service = Service(executable_path=ChromeDriverManager().install())
+    except Exception as e:
+        service = Service(executable_path=ChromeDriverManager(version='114.0.5735.16').install())
     options = webdriver.ChromeOptions()
     options.add_argument('--start-maximized')
     driver = webdriver.Chrome(service=service, options=options)
@@ -313,7 +348,7 @@ def run_salyq(today: str) -> None:
             auth_key_path = join(password_folder, password, listdir(join(password_folder, password))[0])
             logging.info(f'auth_key_path: {auth_key_path}')
 
-            logging.info(f'Logging into Salyq with a brach {branch}')
+            logging.info(f'Logging into Salyk with a brach {branch}')
             login(driver=driver, wait=wait, auth_key_path=auth_key_path, password=password)
 
             screenshot_path = fr'{screen_local_folder_path}/{branch}.png'
@@ -328,6 +363,10 @@ def run_salyq(today: str) -> None:
                 for notification in notifications:
                     if save_notification(today=today, notification=notification,
                                          driver=driver, wait=wait, branch=branch):
+                        logging.info(f'Notification {branch} saved via manual copy and pasting')
+                        send_message(f'Есть уведомление по филиалу {branch}')
+                    elif save_notification_risk(today=today, notification=notification,
+                                                driver=driver, wait=wait, branch=branch):
                         logging.info(f'Notification {branch} saved via manual copy and pasting')
                         send_message(f'Есть уведомление по филиалу {branch}')
                     else:
@@ -386,7 +425,10 @@ def run_salyq(today: str) -> None:
     logging.info('Screen doc saved')
 
     if datetime.datetime.now().weekday() == 4:
-        service = Service(executable_path=ChromeDriverManager().install())
+        try:
+            service = Service(executable_path=ChromeDriverManager().install())
+        except Exception as e:
+            service = Service(executable_path=ChromeDriverManager(version='114.0.5735.16').install())
         options = webdriver.ChromeOptions()
         options.add_argument('--start-maximized')
         driver = webdriver.Chrome(service=service, options=options)
@@ -409,40 +451,31 @@ def run_salyq(today: str) -> None:
                 send_message('Ожидание обработки и получение PDF документа')
                 get_tax_statement(today=today, session=session, headers=headers)
                 send_message('Справка успешно сохранилась')
-    send_message('Конец процесса Salyq')
+    send_message('Конец процесса Salyk')
 
 
-def wait_until(target_hour: int) -> None:
+def wait_until(target_hour: int, delay: int = 300) -> None:
     while True:
         current_hour = time.localtime().tm_hour
         if current_hour == target_hour:
             break
-        logging.info(f'Current hour: {current_hour}. Waiting until {target_hour}')
-        sleep(300)
+        logging.info(f'Current hour: {current_hour}. Waiting until {target_hour} for {delay} seconds')
+        sleep(delay)
 
 
 def run():
-    logging.info('Salyq process started')
+    logging.info('Salyk process started')
     try:
-        while True:
-            today_date = datetime.datetime.now()
-            logging.info(f'Current date: {today_date}')
-            if today_date.weekday() in [5, 6]:
-                logging.info('Current date is weekend. Sleeping for 24 hours')
-                sleep(86400)
+        today_date = datetime.datetime.now()
+        logging.info(f'Current date: {today_date}')
 
-            logging.info('Waiting until 9 AM')
-            wait_until(target_hour=9)
-
-            logging.info('Starting Salyq process')
-            today = datetime.datetime.now().strftime('%d.%m.%Y')
-            run_salyq(today=today)
-            logging.info('Salyq process finished. Sleeping for an hour')
-
-            sleep(3600)
+        logging.info('Starting Salyk process')
+        today = datetime.datetime.now().strftime('%d.%m.%Y')
+        run_salyk(today=today)
+        logging.info('Salyk process finished.')
     except Exception as e:
         error_msg = f'Error occured on robot-12\n' \
-                    f'Process: Salyq\n' \
+                    f'Process: Salyk\n' \
                     f'Error:\n{e}'
         send_message(message=error_msg, is_error=True)
         logging.error(e)

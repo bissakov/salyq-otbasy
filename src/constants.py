@@ -28,10 +28,11 @@ SUBMIT_BUTTON: Tuple[str, str] = (By.CSS_SELECTOR, 'button[type="submit""]')
 LOADER: Tuple[str, str] = (By.CSS_SELECTOR, 'div.thin-loader')
 NOTIFICATION_CONTENT: Tuple[str, str] = (By.CSS_SELECTOR, '#notification-content')
 
-SCREEN_LOCAL_FOLDER_PATH: str = r'Screen'
+SCREEN_LOCAL_FOLDER_PATH: str = r'C:\Users\robot.ad\PycharmProjects\Salyk\Screen'
 SCREEN_FSERVER_FOLDER_PATH: str = r'\\fserver\ДБУИО_Новая\ДБУИО_Общая папка' \
                                   r'\ДБУ_Информация УНУ\АКТ СВЕРКИ, ЛЧС\scrin-2023'
 NOTIFICATION_FOLDER_PATH: str = r'C:\Users\robot.ad\PycharmProjects\Salyk\Notifications'
-BASE_PATH: str = r'\\fserver\ДБУИО_Новая\ДБУИО_Общая папка\ДБУ_Информация УНУ\Криптоключи действующие\Робот'
+# BASE_PATH: str = r'\\fserver\ДБУИО_Новая\ДБУИО_Общая папка\ДБУ_Информация УНУ\Криптоключи действующие\Робот'
+BASE_PATH: str = r'\\dbu157\c$\ЭЦП ключи'
 PDF_SAVE_PATH: str = r'\\fserver\ДБУИО_Новая\ДБУИО_Общая папка\ДБУ_Информация УНУ' \
                      r'\АКТ СВЕРКИ, ЛЧС\01_Анализ лицевых счетов\СПРАВКА об отсутсв зад-ти\2023'
