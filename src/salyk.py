@@ -1,29 +1,26 @@
-import time
 from time import sleep
 
 import datetime
-import json
 import logging
 import pdfkit
 import requests
 import shutil
+from agent_initialization import *
 from constants import *
 from datetime import timedelta
 from docx import Document
 from docx.shared import Inches
 from mail import send_email
 from os import listdir, makedirs
-from os.path import join, exists
+from os.path import join
 from selenium import webdriver
 from selenium.common import TimeoutException, NoSuchWindowException
-from selenium.webdriver import Keys, ActionChains
 from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.chrome.webdriver import WebDriver
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.support.ui import WebDriverWait
 from telegram_send import send_message
 from typing import Dict, List, Any, Optional
-from utils import dispatch, doc_open, kill_all_processes, paste_notification_content
 from webdriver_manager.chrome import ChromeDriverManager
 
 
@@ -452,15 +449,6 @@ def run_salyk(today: str) -> None:
                 get_tax_statement(today=today, session=session, headers=headers)
                 send_message('Справка успешно сохранилась')
     send_message('Конец процесса Salyk')
-
-
-def wait_until(target_hour: int, delay: int = 300) -> None:
-    while True:
-        current_hour = time.localtime().tm_hour
-        if current_hour == target_hour:
-            break
-        logging.info(f'Current hour: {current_hour}. Waiting until {target_hour} for {delay} seconds')
-        sleep(delay)
 
 
 def run():
