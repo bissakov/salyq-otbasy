@@ -3,9 +3,8 @@ import logging
 import urllib3
 from os import makedirs
 from os.path import join
-from selenium.webdriver.remote.remote_connection import LOGGER
-
 from pywinauto import actionlogger
+from selenium.webdriver.remote.remote_connection import LOGGER
 
 
 def setup_logger() -> None:
