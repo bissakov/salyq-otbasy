@@ -1,0 +1,1 @@
+# salyq-otbasy
