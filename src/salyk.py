@@ -1,7 +1,8 @@
 import datetime
 import logging
 import shutil
-from datetime import timedelta
+import traceback
+from datetime import timedelta, datetime
 from os import listdir, makedirs
 from os.path import join
 from time import sleep
@@ -309,10 +310,8 @@ def send_tax_request(today: str, session: requests.Session, headers: Dict[str, s
     response.raise_for_status()
 
 
-def save_pdf_statement(today: str, doc_info: Dict, session: requests.Session, headers: Dict[str, str]) -> None:
-    url = urljoin(BASE_URL, f'{doc_info["actions"][0]["target"]}')
-    response = session.request('GET', url, headers=headers, verify=False)
-
+def save_pdf_statement(today: str, url: str, session: requests.Session, headers: Dict[str, str]) -> None:
+    response = session.request('GET', urljoin(BASE_URL, url), headers=headers, verify=False)
     prefix = len(listdir(PDF_SAVE_PATH)) + 1
     with open(join(PDF_SAVE_PATH, f'{prefix}_справка_{today}.pdf'), mode='wb') as pdf_file:
         pdf_file.write(response.content)
@@ -324,12 +323,21 @@ def get_tax_statement(today: str, session: requests.Session, headers: Dict[str, 
     while True:
         sleep(30)
         response = session.request('GET', url, headers=headers, params=querystring, verify=False)
-        docs_infos: List[Dict[str, str]] = response.json()
-        print(docs_infos)
+        docs_infos: List[Dict] = response.json()
+        logging.info(f'docs_infos: {docs_infos}')
         if not docs_infos:
             continue
-        if len(docs_infos[0]['actions']) != 0:
-            save_pdf_statement(today=today, doc_info=docs_infos[0], session=session, headers=headers)
+        docs_infos.sort(
+            key=lambda x: datetime.strptime(x['requestSendDate'], '%Y-%m-%d %H:%M:%S.%f'),
+            reverse=True
+        )
+        doc_info_url = next(
+            (doc['actions'][0]['target'] for doc in docs_infos
+                if '/declaration/debt' in doc['actions'][0]['target']),
+            None
+        )
+        if doc_info_url:
+            save_pdf_statement(today=today, url=doc_info_url, session=session, headers=headers)
             break
 
 
@@ -358,10 +366,11 @@ def run_salyk(today: str) -> None:
 
     logging.info('Chrome launched')
 
+    # TODO Разкомментировать в случае ошибки с одним из филиалов,
+    # TODO чтобы робот не тратил время на ранние филиалы
     # branch_mappings = {key: val for key, val in branch_mappings.items() if int(key) > 13}
 
     with driver:
-
         send_message(f'Старт процесса Salyk за {today}')
         for branch, branch_name in branch_mappings.items():
             logging.info(f'Working on a branch: {branch}')
@@ -441,14 +450,16 @@ def run_salyk(today: str) -> None:
         send_message('Отправка уведомлений')
         send_email(attachments=attachments)
         logging.info('Email sent')
+    else:
+        send_message('Уведомлений нет')
+        logging.info('No notifications to send')
 
     save_screen_doc(today=today, branch_mappings=branch_mappings)
     doc_path = join(SCREEN_FSERVER_FOLDER_PATH, f'{today}.docx')
     send_message(f'Сохранен документ со скриншотами {doc_path}')
     logging.info('Screen doc saved')
 
-    if datetime.datetime.now().weekday() == 4:
-        driver = webdriver.Chrome(service=service, options=options)
+    if datetime.strptime(today, '%d.%m.%Y').date().weekday() == 4:
         with driver:
             branch = '18'
             logging.info(f'Working on a branch: {branch}')
@@ -469,24 +480,24 @@ def run_salyk(today: str) -> None:
 def run():
     logging.info('Salyk process started')
     try:
-        today_date = datetime.datetime.now()
+        today_date = datetime.now()
         logging.info(f'Current date: {today_date}')
 
         logging.info('Starting Salyk process')
-        today = datetime.datetime.now().strftime('%d.%m.%Y')
+        today = today_date.strftime('%d.%m.%Y')
         run_salyk(today=today)
         logging.info('Salyk process finished.')
-    except Exception as e:
+    except Exception as error:
+        exception_info = traceback.format_exc()
         error_msg = f'Error occured on robot-12\n' \
                     f'Process: Salyk\n' \
-                    f'Error:\n{e}'
+                    f'Error:\n{exception_info}'
         send_message(message=error_msg, is_error=True)
-        logging.exception(e)
-        raise e
+        logging.exception(error)
+        raise error
 
 
 if __name__ == '__main__':
     dotenv.load_dotenv()
-    send_message(message='sdasdas')
     logger.setup_logger()
     run()
