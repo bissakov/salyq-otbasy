@@ -1,4 +1,3 @@
-import datetime
 import logging
 import shutil
 import traceback
@@ -10,7 +9,6 @@ from typing import Dict, List, Any, Optional
 from urllib.parse import urljoin
 
 import docx
-import dotenv
 import pdfkit
 import requests
 from docx.shared import Inches
@@ -28,7 +26,7 @@ from agent_initialization import *
 from config import INDEX_PAGE_URL, LOGIN_BUTTON, AUTH_KEY_INPUT, PASSWORD_INPUT, CONFIRM_PASSWORD_BUTTON, \
     CONFIRM_LOGIN_BUTTON, USER_INFO, PAGE_TITLE, NEWS_DATE, CALENDAR, MENU, BASE_URL, TAX_STATEMENTS_URL, \
     SCREEN_LOCAL_FOLDER_PATH, SCREEN_FSERVER_FOLDER_PATH, NOTIFICATION_FOLDER_PATH, NOTIFICATION_URL, PDF_SAVE_PATH, \
-    BASE_PATH, LOGOUT_URL
+    BASE_PATH, LOGOUT_URL, SESSION, TODAY, BRANCH_MAPPINGS
 from mail import send_email
 from telegram_send import send_message
 
@@ -118,25 +116,25 @@ def get_headers(driver: WebDriver) -> Dict[str, str]:
     }
 
 
-def get_latest_working_day(today: str) -> str:
-    today_date = datetime.datetime.strptime(today, '%d.%m.%Y').date()
+def get_latest_working_day() -> str:
+    today_date = datetime.strptime(TODAY, '%d.%m.%Y').date()
     prev_date = today_date - timedelta(days=1)
 
     if prev_date.weekday() >= 5:
-        prev_date -= datetime.timedelta(days=prev_date.weekday() - 4)
+        prev_date -= timedelta(days=prev_date.weekday() - 4)
 
     return prev_date.strftime('%d.%m.%Y')
 
 
-def get_notifications(driver: WebDriver, today: str) -> Optional[List[Any]]:
+def get_notifications(driver: WebDriver) -> Optional[List[Any]]:
     logging.info('Checking notifications')
 
     url = urljoin(BASE_URL, 'notifications/registry/tp/list')
     logging.info(f'Notifications url {url}')
 
     payload = {
-        'receiveDate1': get_latest_working_day(today=today),
-        'receiveDate2': today,
+        'receiveDate1': get_latest_working_day(),
+        'receiveDate2': TODAY,
         'readDate1': None,
         'readDate2': None,
         'notificationNumber': None,
@@ -168,23 +166,22 @@ def get_notifications(driver: WebDriver, today: str) -> Optional[List[Any]]:
         return None
 
 
-def save_screen_doc(today: str, branch_mappings: Dict[str, str]) -> None:
-    screen_local_folder_path = join(SCREEN_LOCAL_FOLDER_PATH, today)
-    screen_doc_path = join(screen_local_folder_path, f'{today}.docx')
+def save_screen_doc() -> None:
+    screen_doc_path = join(SCREEN_LOCAL_FOLDER_PATH, f'{TODAY}.docx')
     doc = docx.Document()
     doc.add_heading('Снимки экрана Salyk', 0)
-    for branch, branch_name in branch_mappings.items():
+    for branch, branch_name in BRANCH_MAPPINGS.items():
         doc.add_paragraph(branch_name)
-        doc.add_picture(join(screen_local_folder_path, f'{branch}.png'), width=Inches(7))
+        doc.add_picture(join(SCREEN_LOCAL_FOLDER_PATH, f'{branch}.png'), width=Inches(7))
     doc.save(screen_doc_path)
-    file_name = f'{today}.docx'
-    current_day = datetime.datetime.now().strftime('%d.%m.%Y')
-    if today != current_day:
-        file_name = f'{today}_({current_day}).docx'
+    file_name = f'{TODAY}.docx'
+    current_day = datetime.now().strftime('%d.%m.%Y')
+    if TODAY != current_day:
+        file_name = f'{TODAY}_({current_day}).docx'
     shutil.copyfile(screen_doc_path, join(SCREEN_FSERVER_FOLDER_PATH, file_name))
 
 
-def save_notification(today: str, notification: Dict[str, any],
+def save_notification(notification: Dict[str, any],
                       driver: WebDriver, wait: WebDriverWait, branch: str) -> bool:
     if notification['descriptionRu'] == 'низкая':
         logging.info('Invalid type of notification ("низкая")')
@@ -236,8 +233,7 @@ def save_notification(today: str, notification: Dict[str, any],
         scripts.forEach(script => script.remove());
     ''')
 
-    notification_folder_path = join(NOTIFICATION_FOLDER_PATH, today)
-    pdf_name = join(notification_folder_path, f'уведомление_{branch}_{receive_date}.pdf')
+    pdf_name = join(NOTIFICATION_FOLDER_PATH, f'уведомление_{branch}_{receive_date}.pdf')
     logging.info(f'pdf_name: {pdf_name}')
 
     source = driver.execute_script('return document.body.outerHTML;')
@@ -246,7 +242,7 @@ def save_notification(today: str, notification: Dict[str, any],
     return True
 
 
-def save_notification_risk(today: str, notification: Dict[str, any],
+def save_notification_risk(notification: Dict[str, any],
                            driver: WebDriver, wait: WebDriverWait, branch: str) -> bool:
     if notification['descriptionRu'] == 'низкая':
         logging.info('Invalid type of notification ("низкая")')
@@ -288,8 +284,7 @@ def save_notification_risk(today: str, notification: Dict[str, any],
         scripts.forEach(script => script.remove());
     ''')
 
-    notification_folder_path = join(NOTIFICATION_FOLDER_PATH, today)
-    pdf_name = join(notification_folder_path, f'уведомление_{branch}_{receive_date}.pdf')
+    pdf_name = join(NOTIFICATION_FOLDER_PATH, f'уведомление_{branch}_{receive_date}.pdf')
     logging.info(f'pdf_name: {pdf_name}')
 
     source = driver.execute_script('return document.body.outerHTML;')
@@ -298,10 +293,10 @@ def save_notification_risk(today: str, notification: Dict[str, any],
     return True
 
 
-def send_tax_request(today: str, session: requests.Session, headers: Dict[str, str]):
+def send_tax_request(session: requests.Session, headers: Dict[str, str]):
     url = urljoin(BASE_URL, 'declaration/debt/send')
     payload = {
-        'dateRequest': today,
+        'dateRequest': TODAY,
         'refGoal': '0xffff00000019',
         'refReceiver': '0xffff00000011',
         'taxOrgCode': '6007'
@@ -310,16 +305,16 @@ def send_tax_request(today: str, session: requests.Session, headers: Dict[str, s
     response.raise_for_status()
 
 
-def save_pdf_statement(today: str, url: str, session: requests.Session, headers: Dict[str, str]) -> None:
+def save_pdf_statement(url: str, session: requests.Session, headers: Dict[str, str]) -> None:
     response = session.request('GET', urljoin(BASE_URL, url), headers=headers, verify=False)
     prefix = len(listdir(PDF_SAVE_PATH)) + 1
-    with open(join(PDF_SAVE_PATH, f'{prefix}_справка_{today}.pdf'), mode='wb') as pdf_file:
+    with open(join(PDF_SAVE_PATH, f'{prefix}_справка_{TODAY}.pdf'), mode='wb') as pdf_file:
         pdf_file.write(response.content)
 
 
-def get_tax_statement(today: str, session: requests.Session, headers: Dict[str, str]):
+def get_tax_statement(session: requests.Session, headers: Dict[str, str]):
     url = urljoin(BASE_URL, 'declarations/registry/tp/allByDates')
-    querystring = {'from': today, 'to': today}
+    querystring = {'from': TODAY, 'to': TODAY}
     while True:
         sleep(30)
         response = session.request('GET', url, headers=headers, params=querystring, verify=False)
@@ -327,34 +322,25 @@ def get_tax_statement(today: str, session: requests.Session, headers: Dict[str, 
         logging.info(f'docs_infos: {docs_infos}')
         if not docs_infos:
             continue
-        docs_infos.sort(
-            key=lambda x: datetime.strptime(x['requestSendDate'], '%Y-%m-%d %H:%M:%S.%f'),
-            reverse=True
-        )
-        doc_info_url = next(
-            (doc['actions'][0]['target'] for doc in docs_infos
-                if '/declaration/debt' in doc['actions'][0]['target']),
-            None
-        )
+        try:
+            docs_infos.sort(
+                key=lambda x: datetime.strptime(x['requestSendDate'], '%Y-%m-%d %H:%M:%S.%f'),
+                reverse=True
+            )
+            doc_info_url = next(
+                (doc['actions'][0]['target'] for doc in docs_infos
+                    if '/declaration/debt' in doc['actions'][0]['target']),
+                None
+            )
+        except IndexError:
+            sleep(30)
+            continue
         if doc_info_url:
-            save_pdf_statement(today=today, url=doc_info_url, session=session, headers=headers)
+            save_pdf_statement(url=doc_info_url, session=session, headers=headers)
             break
 
 
-def run_salyk(today: str) -> None:
-    branch_mappings_json_path = r'C:\Users\robot.ad\Desktop\Salyk\branch_mapping.json'
-    with open(file=branch_mappings_json_path, mode='r', encoding='utf-8') as branch_mappings_file:
-        branch_mappings: Dict[str, str] = json.load(branch_mappings_file)
-    logging.info(f'branch_mappings: {branch_mappings}')
-
-    screen_local_folder_path = join(SCREEN_LOCAL_FOLDER_PATH, today)
-    notification_folder_path = join(NOTIFICATION_FOLDER_PATH, today)
-
-    logging.info(f'screen_local_folder_path: {screen_local_folder_path}')
-    logging.info(f'notification_folder_path: {notification_folder_path}')
-
-    makedirs(screen_local_folder_path, exist_ok=True)
-    makedirs(notification_folder_path, exist_ok=True)
+def regular_job() -> None:
 
     logging.info('Созданы папки для скриншотов и уведомлений')
 
@@ -366,33 +352,33 @@ def run_salyk(today: str) -> None:
 
     logging.info('Chrome launched')
 
-    # TODO Разкомментировать в случае ошибки с одним из филиалов,
-    # TODO чтобы робот не тратил время на ранние филиалы
-    # branch_mappings = {key: val for key, val in branch_mappings.items() if int(key) > 13}
-
     with driver:
-        send_message(f'Старт процесса Salyk за {today}')
-        for branch, branch_name in branch_mappings.items():
+        send_message(f'Старт процесса Salyk за {TODAY}')
+        for branch, branch_name in BRANCH_MAPPINGS.items():
             logging.info(f'Working on a branch: {branch}')
 
             logging.info(f'Logging into Salyk with a brach {branch}')
-            login(driver=driver, wait=wait, branch=branch)
+            try:
+                login(driver=driver, wait=wait, branch=branch)
+            except FileNotFoundError as error:
+                logging.exception(f'Error while logging in: {error}')
+                send_message('Файла ЭЦП не существует. Возможно сервер не доступен')
 
-            screenshot_path = fr'{screen_local_folder_path}/{branch}.png'
+            screenshot_path = fr'{SCREEN_LOCAL_FOLDER_PATH}/{branch}.png'
             driver.save_screenshot(screenshot_path)
             logging.info(f'Screenshot {screenshot_path} saved for a branch {branch}')
             send_message(f'Сохранен скриншот по филиалу {branch}')
 
-            notifications = get_notifications(driver=driver, today=today)
+            notifications = get_notifications(driver=driver)
 
             if notifications:
                 logging.info(f'Notifications: {len(notifications)} for branch: {branch}')
                 for notification in notifications:
-                    if save_notification(today=today, notification=notification,
+                    if save_notification(notification=notification,
                                          driver=driver, wait=wait, branch=branch):
                         logging.info(f'Notification {branch} saved via manual copy and pasting')
                         send_message(f'Есть уведомление по филиалу {branch}')
-                    elif save_notification_risk(today=today, notification=notification,
+                    elif save_notification_risk(notification=notification,
                                                 driver=driver, wait=wait, branch=branch):
                         logging.info(f'Notification {branch} saved via manual copy and pasting')
                         send_message(f'Есть уведомление по филиалу {branch}')
@@ -415,7 +401,7 @@ def run_salyk(today: str) -> None:
                             receive_date = notification['receiveDate'].replace(':', '')
                             logging.info(f'receive_date: {receive_date}')
 
-                            pdf_name = join(notification_folder_path, f'уведомление_{branch}_{receive_date}.pdf')
+                            pdf_name = join(NOTIFICATION_FOLDER_PATH, f'уведомление_{branch}_{receive_date}.pdf')
                             logging.info(f'pdf_name: {pdf_name}')
 
                             if response.text == '':
@@ -445,7 +431,42 @@ def run_salyk(today: str) -> None:
                 driver.get(LOGOUT_URL)
             sleep(2)
 
-    attachments = [join(notification_folder_path, file_name) for file_name in listdir(notification_folder_path)]
+
+def central_office_job() -> None:
+    service = Service(executable_path=ChromeDriverManager().install())
+    options = webdriver.ChromeOptions()
+    options.add_argument('--start-maximized')
+    driver = webdriver.Chrome(service=service, options=options)
+    wait = WebDriverWait(driver, 10)
+
+    with driver:
+        branch = '18'
+        logging.info(f'Working on a branch: {branch}')
+
+        login(driver=driver, wait=wait, branch=branch)
+
+        headers = get_headers(driver=driver)
+        with requests.Session() as session:
+            send_message('Отправление запроса на получение сведений об отсутствии задолженности')
+            send_tax_request(session=session, headers=headers)
+            sleep(5)
+            send_message('Ожидание обработки и получение PDF документа')
+            get_tax_statement(session=session, headers=headers)
+            send_message('Справка успешно сохранилась')
+
+
+def run_salyk() -> None:
+    logging.info(f'branch_mappings: {BRANCH_MAPPINGS}')
+
+    logging.info(f'screen_local_folder_path: {SCREEN_LOCAL_FOLDER_PATH}')
+    logging.info(f'notification_folder_path: {NOTIFICATION_FOLDER_PATH}')
+
+    makedirs(SCREEN_LOCAL_FOLDER_PATH, exist_ok=True)
+    makedirs(NOTIFICATION_FOLDER_PATH, exist_ok=True)
+
+    regular_job()
+
+    attachments = [join(NOTIFICATION_FOLDER_PATH, file_name) for file_name in listdir(NOTIFICATION_FOLDER_PATH)]
     if attachments:
         send_message('Отправка уведомлений')
         send_email(attachments=attachments)
@@ -454,38 +475,23 @@ def run_salyk(today: str) -> None:
         send_message('Уведомлений нет')
         logging.info('No notifications to send')
 
-    save_screen_doc(today=today, branch_mappings=branch_mappings)
-    doc_path = join(SCREEN_FSERVER_FOLDER_PATH, f'{today}.docx')
-    send_message(f'Сохранен документ со скриншотами {doc_path}')
+    save_screen_doc()
+    send_message(message='Сохранен документ со скриншотами')
     logging.info('Screen doc saved')
 
-    if datetime.strptime(today, '%d.%m.%Y').date().weekday() == 4:
-        with driver:
-            branch = '18'
-            logging.info(f'Working on a branch: {branch}')
+    if datetime.strptime(TODAY, '%d.%m.%Y').date().weekday() == 4:
+        central_office_job()
 
-            login(driver=driver, wait=wait, branch=branch)
-
-            headers = get_headers(driver=driver)
-            with requests.Session() as session:
-                send_message('Отправление запроса на получение сведений об отсутствии задолженности')
-                send_tax_request(today=today, session=session, headers=headers)
-                sleep(5)
-                send_message('Ожидание обработки и получение PDF документа')
-                get_tax_statement(today=today, session=session, headers=headers)
-                send_message('Справка успешно сохранилась')
     send_message('Конец процесса Salyk')
 
 
 def run():
     logging.info('Salyk process started')
     try:
-        today_date = datetime.now()
-        logging.info(f'Current date: {today_date}')
+        logging.info(f'Current date: {TODAY}')
 
         logging.info('Starting Salyk process')
-        today = today_date.strftime('%d.%m.%Y')
-        run_salyk(today=today)
+        run_salyk()
         logging.info('Salyk process finished.')
     except Exception as error:
         exception_info = traceback.format_exc()
@@ -495,9 +501,10 @@ def run():
         send_message(message=error_msg, is_error=True)
         logging.exception(error)
         raise error
+    finally:
+        SESSION.close()
 
 
 if __name__ == '__main__':
-    dotenv.load_dotenv()
     logger.setup_logger()
     run()

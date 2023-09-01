@@ -7,7 +7,7 @@ from selenium.webdriver.remote.remote_connection import LOGGER
 
 
 def setup_logger() -> None:
-    root_folder = r'C:\Users\robot.ad\PycharmProjects\Salyk\logs'
+    root_folder = r'C:\Users\robot.ad\Desktop\Salyk\logs'
     makedirs(root_folder, exist_ok=True)
     logger = logging.getLogger()
     logger.setLevel(logging.DEBUG)
